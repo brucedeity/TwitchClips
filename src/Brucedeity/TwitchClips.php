@@ -17,12 +17,12 @@ class TwitchClips
     private $clientId;
     private $clientSecret;
 
-    public function __construct($channelNames)
+    public function __construct()
     {
         // Initialize the Env class and read the .env file
         Env::init(dirname(__DIR__, 2) . '/.env');
 
-        $this->channelNames = $channelNames;
+        $this->channelNames = $channelNames = explode(',', Env::get('CHANNEL_NAMES'));
     
         // Read the client ID and client secret from the environment file
         $this->clientId = Env::get('CLIENT_ID');
@@ -316,6 +316,6 @@ class TwitchClips
     }
 }
 
-$twitchClass = new TwitchClips(['jumayumin', 'gordox', 'jukes', 'paulinholokobr', 'luquet4', 'raizqt', 'akrinuss'], 86400);
+$twitchClass = new TwitchClips;
 
 echo json_encode($twitchClass->downloadClips());
