@@ -2,6 +2,7 @@
 namespace Brucedeity\Twitchclips;
 
 use Exception;
+use DateTime;
 
 class TwitchClips
 {
@@ -30,8 +31,12 @@ class TwitchClips
         // Set the age of the clips to be at least 24 hours old
         $age = time() - 24*60*60;
 
+        // Convert the age to the correct format
+        $date = new DateTime("@$age");
+        $timestamp = $date->format('Y-m-d\TH:i:s\Z');
+
         // Set the API endpoint URL
-        $endpointUrl = "https://api.twitch.tv/helix/clips?broadcaster_id=$broadcasterId&first={$this->clipCount}&started_at=".date('Y-m-d\TH:i:s', $age);
+        $endpointUrl = "https://api.twitch.tv/helix/clips?broadcaster_id=$broadcasterId&first=$this->clipCount&started_at=$timestamp";
 
         // Send a GET request to the API endpoint
         $ch = curl_init();
@@ -73,34 +78,56 @@ class TwitchClips
         return $data['data'];
     }
 
+    /**
+     * Sanitizes a file name by replacing any invalid characters with an underscore (_).
+     *
+     * @param string $filename The file name to sanitize.
+     * @return string The sanitized file name.
+     */
+    private function sanitizeFilename($filename)
+    {
+        // Replace any invalid characters with an underscore
+        $filename = preg_replace('/[^a-zA-Z0-9_\.]/', '_', $filename);
+
+        // Trim any leading or trailing underscores
+        $filename = trim($filename, '_');
+
+        return $filename;
+    }
 
     public function downloadClips()
     {
-        // Set the target directory
-        $targetDir = "../../clips";
-
+        // Set the base directory
+        $baseDir = dirname(__DIR__, 2);
+    
         // Iterate over the channel names
         foreach ($this->channelNames as $channelName) {
             try {
                 // Get the broadcaster ID for the channel
                 $broadcasterId = $this->getBroadcasterId($channelName, $this->oauthToken);
-
+    
                 // Get the clips for the channel
                 $clips = $this->getClips($broadcasterId);
-
+    
+                // Create the target directory for the channel if it does not exist
+                $targetDir = $baseDir . DIRECTORY_SEPARATOR . 'clips' . DIRECTORY_SEPARATOR . $channelName;
+                if (!is_dir($targetDir)) {
+                    mkdir($targetDir, 0775, true);
+                }
+    
                 // Iterate over the clips
                 foreach ($clips as $clip) {
-                    // Get the video URL of the clip
-                    $videoUrl = $this->parseVideoUrl($clip['thumbnail_url']);
-
+                    // Sanitize the file name
+                    $filename = $this->sanitizeFilename($clip['title']);
+    
                     // Construct the file path of the clip
-                    $filePath = $targetDir . '/' . $clip['id'] . '.mp4';
-
+                    $filePath = $targetDir . DIRECTORY_SEPARATOR . $filename . '.mp4';
+    
                     // Download the clip to the file path
-                    file_put_contents($filePath, file_get_contents($videoUrl));
-
+                    file_put_contents($filePath, file_get_contents($clip['url']));
+    
                     // Print a message indicating that the clip was downloaded
-                    echo "Downloaded clip {$clip['id']} to $filePath\n";
+                    echo "Downloaded clip {$clip['title']} to $filePath\n";
                 }
             } catch (Exception $e) {
                 // Print an error message if an exception was thrown
@@ -108,8 +135,8 @@ class TwitchClips
             }
         }
     }
-
-
+    
+    
     /**
      * Gets the broadcaster ID for a specified Twitch channel.
      *
