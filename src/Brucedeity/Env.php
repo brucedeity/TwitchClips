@@ -2,6 +2,8 @@
 
 namespace Brucedeity\Twitchclips;
 
+use Exception;
+
 class Env
 {
     /**

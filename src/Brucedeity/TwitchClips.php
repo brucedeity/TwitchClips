@@ -1,12 +1,15 @@
 <?php
 namespace Brucedeity\Twitchclips;
 
+date_default_timezone_set('America/Sao_Paulo');
+
 // Require the Env class
 require_once __DIR__ . '/Env.php';
 
 
 use Exception;
 use DateTime;
+use DateInterval;
 
 class TwitchClips
 {
@@ -24,10 +27,53 @@ class TwitchClips
         // Read the client ID and client secret from the environment file
         $this->clientId = Env::get('CLIENT_ID');
         $this->clientSecret = Env::get('CLIENT_SECRET');
-        $this->clipCount = Env::get('CLIP_COUNT');
 
         // Get the OAuth token
         $this->oauthToken = $this->getOauthToken();
+    }
+
+    public function welcome()
+    {
+        // Get the start and end dates
+        $startDate = $this->getStartDate();
+        $endDate = $this->getEndDate();
+
+        $numClips = Env::get('NUM_CLIPS');
+
+        // Calculate the real number of clips
+        $realNumClips = $numClips * count($this->channelNames);
+
+        // Output a welcome message
+        echo "Welcome to the Twitch Clips downloader!\n";
+        echo "Start date: $startDate\n";
+        echo "End date: $endDate\n";
+        echo "Number of clips per channel: {$numClips}\n";
+        echo "Channels: " . implode(', ', $this->channelNames) . "\n";
+        echo "Total number of clips: $realNumClips\n";
+    }
+
+    private function getStartDate()
+    {
+        // Get the number of days to subtract from the current date
+        $subDays = Env::get('SUB_DAYS');
+
+        // Create a DateTime object for the current date
+        $date = new DateTime();
+
+        // Subtract the number of days from the current date
+        $date->sub(new DateInterval("P{$subDays}D"));
+
+        // Return the date in the required format
+        return $date->format('Y-m-d\TH:i:s\Z');
+    }
+
+    private function getEndDate()
+    {
+        // Create a DateTime object for the current date
+        $date = new DateTime();
+
+        // Return the date in the required format
+        return $date->format('Y-m-d\TH:i:s\Z');
     }
 
     /**
@@ -37,55 +83,53 @@ class TwitchClips
      * @return array The clip data.
      * @throws Exception If the clip data could not be obtained.
      */
-    private function getClips($broadcasterId)
+    public function getClips($broadcasterId)
     {
-        // Set the age of the clips to be at least 24 hours old
-        $age = time() - 24*60*60;
+        // Set the base URL for the Twitch API
+        $baseUrl = 'https://api.twitch.tv/helix';
 
-        // Convert the age to the correct format
-        $date = new DateTime("@$age");
-        $timestamp = $date->format('Y-m-d\TH:i:s\Z');
+        // Set the number of clips to retrieve
+        $numClips = Env::get('NUM_CLIPS');
 
-        // Set the API endpoint URL
-        $endpointUrl = "https://api.twitch.tv/helix/clips?broadcaster_id=$broadcasterId&first=$this->clipCount&started_at=$timestamp";
+        $startDate = $this->getStartDate();
+        $endDate = $this->getEndDate();
+        
+         // Set the URL for the API request
+        $endpointUrl = "$baseUrl/clips?broadcaster_id=$broadcasterId&first=$numClips&started_at=$startDate&ended_at=$endDate";
 
-        // Send a GET request to the API endpoint
+        // Set up the cURL request
         $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $endpointUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Client-ID: {$this->clientId}", "Authorization: Bearer $this->oauthToken"]);
-        $response = curl_exec($ch);
-        $httpStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $endpointUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                "Client-ID: {$this->clientId}",
+                "Authorization: Bearer $this->oauthToken"
+            ]
+        ]);
 
-        // Check for cURL errors
+        // Send the request and get the response
+        $response = curl_exec($ch);
+
+        // Check if the request was successful
         if ($response === false) {
-            throw new Exception('cURL error: ' . curl_error($ch));
+            // Throw an exception if the request failed
+            throw new Exception(curl_error($ch));
         }
 
         // Decode the response
-        $data = json_decode($response, true);
+        $responseData = json_decode($response, true);
 
-        // Check for API errors
-        if ($httpStatus !== 200) {
-            // Check if the response contains the error key
-            if (isset($data['error'])) {
-                // Print the error message
-                echo "Twitch API error: {$data['error']}\n";
-            } else {
-                echo "API error: HTTP status $httpStatus\n";
-            }
-            throw new Exception('API error: Could not get clip data');
+        // Check if the response contains an error message
+        if (isset($responseData['error'])) {
+            // Throw an exception if the response contains an error message
+            throw new Exception($responseData['error']);
         }
 
-        // Check if the response contains the data key
-        if (!isset($data['data'])) {
-            throw new Exception('API error: No data in response');
-        }
-
-        // Return the clip data
-        return $data['data'];
+        // Return the clips
+        return $responseData['data'];
     }
+
 
     /**
      * Sanitizes a file name by replacing any invalid characters with an underscore (_).
@@ -106,6 +150,9 @@ class TwitchClips
 
     public function downloadClips()
     {
+        // Output the welcome message
+        $this->welcome();
+
         // Set the base directory
         $baseDir = dirname(__DIR__, 2);
     
@@ -113,11 +160,11 @@ class TwitchClips
         foreach ($this->channelNames as $channelName) {
             try {
                 // Get the broadcaster ID for the channel
-                $broadcasterId = $this->getBroadcasterId($channelName, $this->oauthToken);
-    
+                $broadcasterId = $this->getBroadcasterId($channelName);
+
                 // Get the clips for the channel
                 $clips = $this->getClips($broadcasterId);
-    
+
                 // Create the target directory for the channel if it does not exist
                 $targetDir = $baseDir . DIRECTORY_SEPARATOR . 'clips' . DIRECTORY_SEPARATOR . $channelName;
                 if (!is_dir($targetDir)) {
@@ -132,66 +179,75 @@ class TwitchClips
                     // Construct the file path of the clip
                     $filePath = $targetDir . DIRECTORY_SEPARATOR . $filename . '.mp4';
     
-                    // Download the clip to the file path
-                    file_put_contents($filePath, file_get_contents($clip['url']));
+                    // Get the video URL of the clip
+                    $videoUrl = $this->parseVideoUrl($clip['thumbnail_url']);
     
-                    // Print a message indicating that the clip was downloaded
-                    echo "Downloaded clip {$clip['title']} to $filePath\n";
+                    try {
+                        // Download the clip to the file path
+                        file_put_contents($filePath, file_get_contents($videoUrl));
+    
+                        // Print a message indicating that the clip was downloaded
+                        echo "Downloaded a {$channelName}'s clip: {$clip['title']} to $filePath\n";
+                    } catch (Exception $e) {
+                        // Print an error message if an exception was thrown while downloading the clip
+                        echo "Error downloading clip {$clip['title']}: {$e->getMessage()}\n";
+                    }
                 }
             } catch (Exception $e) {
-                // Print an error message if an exception was thrown
-                echo "Error: {$e->getMessage()}\n";
+                // Print an error message if an exception was thrown while getting the clips
+                echo "Error getting clips for channel {$channelName}: {$e->getMessage()}\n";
             }
         }
     }
+    
     
     
     /**
      * Gets the broadcaster ID for a specified Twitch channel.
      *
      * @param string $channelName The name of the Twitch channel.
-     * @param string $oauthToken The OAuth token for the user.
      * @return string The broadcaster ID.
      * @throws Exception If the broadcaster ID could not be obtained.
      */
-    private function getBroadcasterId($channelName, $oauthToken)
+    private function getBroadcasterId($channelName)
     {
         // Set the API endpoint URL
-        $endpointUrl = "https://api.twitch.tv/helix/users?login={$channelName}";
+        $endpointUrl = "https://api.twitch.tv/helix/users?login=$channelName";
 
         // Send a GET request to the API endpoint
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $endpointUrl);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Client-ID: {$this->clientId}", "Authorization: Bearer $oauthToken"]);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Client-ID: {$this->clientId}", "Authorization: Bearer {$this->oauthToken}"]);
         $response = curl_exec($ch);
         $httpStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-
+    
         // Check for cURL errors
         if ($response === false) {
             throw new Exception('cURL error: ' . curl_error($ch));
         }
-
+    
         // Decode the response
         $data = json_decode($response, true);
-
+    
         // Check for API errors
         if ($httpStatus !== 200) {
             throw new Exception("API error: HTTP status $httpStatus");
         }
-
+    
         // Check if the response contains the data key
         if (!isset($data['data'])) {
             throw new Exception('API error: No data in response');
         }
-
+    
         // Get the first user in the response
         $user = $data['data'][0];
-
+    
         // Return the broadcaster ID
         return $user['id'];
     }
+    
 
     /**
      * Parses the thumbnail URL of a Twitch clip into the URL of the video.
@@ -205,7 +261,7 @@ class TwitchClips
     
         // Extract the clip ID from the thumbnail URL and construct the video URL
         $videoUrl = preg_replace('/.*?clip-([^-]+).*/', '$1', $thumbnailUrl).'.mp4';
-    
+
         return $videoUrl;
     }
 
@@ -260,6 +316,6 @@ class TwitchClips
     }
 }
 
-$twitchClass = new TwitchClips(['gordox'], 86400);
+$twitchClass = new TwitchClips(['jumayumin', 'gordox', 'jukes', 'paulinholokobr', 'luquet4', 'raizqt', 'akrinuss'], 86400);
 
 echo json_encode($twitchClass->downloadClips());
