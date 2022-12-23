@@ -1,21 +1,32 @@
 <?php
 namespace Brucedeity\Twitchclips;
 
+// Require the Env class
+require_once __DIR__ . '/Env.php';
+
+
 use Exception;
 use DateTime;
 
 class TwitchClips
 {
-    // Replace YOUR_CLIENT_ID and YOUR_CLIENT_SECRET with your actual Twitch API client ID and client secret
-    private $clientId = '1lzi1u67kidturtq65mn3yz4ijsxxv';
-    private $clientSecret = 'ln35os3a2z6pjiy2ng9zglw4gn1rr2';
+    // Read the client ID and client secret from the environment file
+    private $clientId;
+    private $clientSecret;
 
-    public function __construct($channelNames, $maxAge = 86400, $clipCount = 1)
+    public function __construct($channelNames)
     {
-        $this->channelNames = $channelNames;
-        $this->maxAge = $maxAge;
-        $this->clipCount = $clipCount;
+        // Initialize the Env class and read the .env file
+        Env::init(dirname(__DIR__, 2) . '/.env');
 
+        $this->channelNames = $channelNames;
+    
+        // Read the client ID and client secret from the environment file
+        $this->clientId = Env::get('CLIENT_ID');
+        $this->clientSecret = Env::get('CLIENT_SECRET');
+        $this->clipCount = Env::get('CLIP_COUNT');
+
+        // Get the OAuth token
         $this->oauthToken = $this->getOauthToken();
     }
 
@@ -54,8 +65,6 @@ class TwitchClips
 
         // Decode the response
         $data = json_decode($response, true);
-
-        print_r($data);
 
         // Check for API errors
         if ($httpStatus !== 200) {
